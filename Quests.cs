@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Quests", "Gonzi", "2.4.2")]
+    [Info("Quests", "Gonzi", "2.4.3")]
     [Description("Creates quests for players to go on to earn rewards, complete with a GUI menu")]
     public class Quests : RustPlugin
     {
@@ -25,11 +25,11 @@ namespace Oxide.Plugins
         [PluginReference] Plugin LustyMap;
         [PluginReference] Plugin EventManager;
         [PluginReference] Plugin HuntRPG;
+        [PluginReference] Plugin XPerience;
         [PluginReference] Plugin PlayerChallenges;
         [PluginReference] Plugin BetterChat;
 
         ConfigData configData;
-
         QuestData questData;
         PlayerData playerData;
         NPCData vendors;
@@ -134,6 +134,7 @@ namespace Oxide.Plugins
             public bool isRP = false;
             public bool isCoins = false;
             public bool isHuntXP = false;
+            public bool isXPerience = false;
             public string DisplayName;
             public string ShortName;
             public int ID;
@@ -975,6 +976,10 @@ namespace Oxide.Plugins
                 {
                     HuntRPG?.Call("GiveEXP", player, (int)reward.Amount);
                 }
+                else if (reward.isXPerience)
+                {
+                    XPerience?.Call("GiveXP", player, (double)reward.Amount);
+                }
                 else
                 {
                     if (string.IsNullOrEmpty(reward.ShortName)) return true;
@@ -1713,10 +1718,11 @@ namespace Oxide.Plugins
                         if (ServerRewards) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("RP", player.UserIDString)} (ServerRewards)", "QUI_RewardType rp", i); i++;
                         CreateRewardTypeButton(ref HelpMain, UIPanel, LA("Item", player.UserIDString), "QUI_RewardType item", i); i++;
                         if (HuntRPG) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("HuntXP", player.UserIDString)} (HuntRPG)", "QUI_RewardType huntxp", i); i++;
+                        if (XPerience) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("XPerienceXP", player.UserIDString)} (XPerience)", "QUI_RewardType xperiencexp", i); i++;
                     }
                     break;
                 case 5:
-                    if (quest.item.isCoins || quest.item.isRP || quest.item.isHuntXP)
+                    if (quest.item.isCoins || quest.item.isRP || quest.item.isHuntXP || quest.item.isXPerience)
                         QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelRewA", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
                     else
                     {
@@ -1858,6 +1864,7 @@ namespace Oxide.Plugins
                     if (ServerRewards) CreateRewardTypeButton(ref HelpMain, UIPanel, "RP (ServerRewards)", "QUI_RewardType rp", i); i++;
                     CreateRewardTypeButton(ref HelpMain, UIPanel, LA("Item", player.UserIDString), "QUI_RewardType item", i); i++;
                     if (HuntRPG) CreateRewardTypeButton(ref HelpMain, UIPanel, "XP (HuntRPG)", "QUI_RewardType huntxp", i); i++;
+                    if (XPerience) CreateRewardTypeButton(ref HelpMain, UIPanel, "XP (XPerience)", "QUI_RewardType xperiencexp", i); i++;
                     CuiHelper.AddUi(player, HelpMain);
                     return;
                 case 3:
@@ -1865,7 +1872,7 @@ namespace Oxide.Plugins
                         HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
                         QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
                         var quest = ActiveCreations[player.userID];
-                        if (quest.deliveryInfo.Reward.isCoins || quest.deliveryInfo.Reward.isRP || quest.deliveryInfo.Reward.isHuntXP)
+                        if (quest.deliveryInfo.Reward.isCoins || quest.deliveryInfo.Reward.isRP || quest.deliveryInfo.Reward.isHuntXP || quest.deliveryInfo.Reward.isXPerience)
                             DeliveryHelp(player, 4);
                         else
                         {
@@ -2532,6 +2539,7 @@ namespace Oxide.Plugins
                 bool isRP = false;
                 bool isCoins = false;
                 bool isHuntXP = false;
+                bool isXPerience = false;
                 string name = "";
 
                 switch (rewardType)
@@ -2548,6 +2556,10 @@ namespace Oxide.Plugins
                         isHuntXP = true;
                         name = LA("HuntXP", player.UserIDString);
                         break;
+                    case "xperiencexp":
+                        isXPerience = true;
+                        name = LA("XPerienceXP", player.UserIDString);
+                        break;
                     default:
                         break;
                 }
@@ -2558,6 +2570,7 @@ namespace Oxide.Plugins
                     Creator.item.isRP = isRP;
                     Creator.item.isCoins = isCoins;
                     Creator.item.isHuntXP = isHuntXP;
+                    Creator.item.isXPerience = isXPerience;
                     Creator.item.DisplayName = name;
                     CreationHelp(player, 5);
                 }
@@ -2566,6 +2579,7 @@ namespace Oxide.Plugins
                     Creator.deliveryInfo.Reward.isRP = isRP;
                     Creator.deliveryInfo.Reward.isCoins = isCoins;
                     Creator.deliveryInfo.Reward.isHuntXP = isHuntXP;
+                    Creator.deliveryInfo.Reward.isXPerience = isXPerience;
                     Creator.deliveryInfo.Reward.DisplayName = name;
                     DeliveryHelp(player, 3);
                 }
@@ -3364,6 +3378,7 @@ namespace Oxide.Plugins
             {"Coins", "Coins"},
             {"RP", "RP"},
             {"HuntXP", "XP"},
+            {"XPerienceXP", "XPerienceXP"},
             {"Item", "Item"},
             {"creHelRewA", "Enter a reward amount"},
             {"creHelIH", "Place the item you want to issue as a reward in your hands and type"},

@@ -3067,6 +3067,14 @@ namespace Oxide.Plugins
             else SendMSG(player, LA("noNPC", player.UserIDString));
         }
 
+        [ConsoleCommand("wipePlayerProgress")]
+        void ccmdwipePlayerProgress(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null) return;
+            playerData.PlayerProgress = null;
+            Player_Data.WriteObject(Player_Data);
+            LoadData();
+        }
         #endregion
 
         #region Data Management

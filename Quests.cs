@@ -405,9 +405,9 @@ namespace Oxide.Plugins
         }
 
         //Craft
-        void OnItemCraftFinished(ItemCraftTask task, Item item)
+        void OnItemCraftFinished(ItemCraftTask task, Item item, ItemCrafter crafter)
         {
-            var player = task.owner;
+            var player = crafter.owner;
             if (player != null)
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Craft))
                     ProcessProgress(player, QuestType.Craft, item.info.shortname, item.amount);

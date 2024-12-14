@@ -961,6 +961,10 @@ namespace Oxide.Plugins
 
         private bool GiveReward(BasePlayer player, List<RewardItem> rewards)
         {
+            var countItemRewards = rewards.Count(r => !string.IsNullOrEmpty(r.ShortName));
+            var usedItemSlots = player.inventory.containerMain.itemList.Count + player.inventory.containerBelt.itemList.Count;
+            if (usedItemSlots + countItemRewards > 30) return false;
+            
             foreach (var reward in rewards)
             {
                 if (reward.isCoins && Economics)
@@ -981,7 +985,6 @@ namespace Oxide.Plugins
                     var definition = FindItemDefinition(reward.ShortName);
                     if (definition != null)
                     {
-                        if (player.inventory.AllItems().Count() >= 30) return false;
                         var item = ItemManager.Create(definition, (int)reward.Amount, reward.Skin);
                         if (item != null)
                         {

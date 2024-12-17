@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Quests", "Gonzi", "2.4.2")]
+    [Info("Quests", "Gonzi", "2.4.4")]
     [Description("Creates quests for players to go on to earn rewards, complete with a GUI menu")]
     public class Quests : RustPlugin
     {
@@ -51,10 +51,10 @@ namespace Oxide.Plugins
         private Dictionary<ulong, bool> AddVendor = new Dictionary<ulong, bool>();
 
         private Dictionary<QuestType, List<string>> AllObjectives = new Dictionary<QuestType, List<string>>();
-        private Dictionary<uint, Dictionary<ulong, int>> HeliAttackers = new Dictionary<uint, Dictionary<ulong, int>>();
+        private Dictionary<NetworkableId, Dictionary<ulong, float>> VehicleAttackers = new Dictionary<NetworkableId, Dictionary<ulong, float>>();
 
         private Dictionary<ulong, List<string>> OpenUI = new Dictionary<ulong, List<string>>();
-        private Dictionary<uint, ulong> Looters = new Dictionary<uint, ulong>();
+        private Dictionary<ItemId, ulong> Looters = new Dictionary<ItemId, ulong>();
 
         private List<ulong> StatsMenu = new List<ulong>();
         private List<ulong> OpenMenuBind = new List<ulong>();
@@ -327,23 +327,21 @@ namespace Oxide.Plugins
             try
             {
                 if (entity == null || info == null) return;
-                string entname = entity?.ShortPrefabName;
-                if (entname == "testridablehorse")
-                {
-                    entname = "horse";
-                }
 
-                if ((entname.Contains("scientist")) && (!entname.Contains("corpse")))
-                {
-                    entname = "scientist";
-                }
+                string entname = getEntityName(entity);
+                if (entname == null) return;
 
                 BasePlayer player = null;
 
-                if (info.InitiatorPlayer != null)
-                    player = info.InitiatorPlayer;
-                else if (entity.GetComponent<BaseHelicopter>() != null)
+                if (entname == "patrolhelicopter" || entname == "bradleyapc")
+                {
                     player = BasePlayer.FindByID(GetLastAttacker(entity.net.ID));
+                    VehicleAttackers.Remove(entity.net.ID);
+                }
+                else if (info.InitiatorPlayer != null)
+                {
+                    player = info.InitiatorPlayer;
+                }
 
                 if (player != null)
                 {
@@ -361,21 +359,21 @@ namespace Oxide.Plugins
 
         void OnEntityTakeDamage(BaseCombatEntity victim, HitInfo info)
         {
-            if (victim.GetComponent<BaseHelicopter>() != null && info?.Initiator?.ToPlayer() != null)
+            var entname = getEntityName(victim);
+            if (entname == null || (entname != "patrolhelicopter" && entname != "bradleyapc")) return;
+
+            var attacker = info?.Initiator?.ToPlayer();
+            if (attacker == null) return;
+
+            NextTick(() =>
             {
-                var heli = victim.GetComponent<BaseHelicopter>();
-                var player = info.Initiator.ToPlayer();
-                if (isPlaying(player)) return;
-                NextTick(() =>
-                {
-                    if (heli == null) return;
-                    if (!HeliAttackers.ContainsKey(heli.net.ID))
-                        HeliAttackers.Add(heli.net.ID, new Dictionary<ulong, int>());
-                    if (!HeliAttackers[heli.net.ID].ContainsKey(player.userID))
-                        HeliAttackers[heli.net.ID].Add(player.userID, 0);
-                    HeliAttackers[heli.net.ID][player.userID]++;
-                });
-            }
+                if (victim?.net?.ID == null) return;
+                if (!VehicleAttackers.ContainsKey(victim.net.ID))
+                    VehicleAttackers.Add(victim.net.ID, new Dictionary<ulong, float>());
+                if (!VehicleAttackers[victim.net.ID].ContainsKey(attacker.userID))
+                    VehicleAttackers[victim.net.ID].Add(attacker.userID, 0);
+                VehicleAttackers[victim.net.ID][attacker.userID] += info.damageTypes.Total();
+            });
         }
 
         // Gather
@@ -405,9 +403,9 @@ namespace Oxide.Plugins
         }
 
         //Craft
-        void OnItemCraftFinished(ItemCraftTask task, Item item)
+        void OnItemCraftFinished(ItemCraftTask task, Item item, ItemCrafter itemCrafter)
         {
-            var player = task.owner;
+            var player = itemCrafter.owner;
             if (player != null)
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Craft))
                     ProcessProgress(player, QuestType.Craft, item.info.shortname, item.amount);
@@ -822,8 +820,8 @@ namespace Oxide.Plugins
                 "player",
                 "scientist",
                 "murderer",
-                "tunneldweller",
-                "underwaterdweller",
+                "npc_tunneldweller",
+                "npc_underwaterdweller",
                 "scarecrow",
                 "simpleshark"
             };
@@ -839,8 +837,8 @@ namespace Oxide.Plugins
             DisplayNames.Add("player", "Player");
             DisplayNames.Add("scientist", "Scientist");
             DisplayNames.Add("murderer", "Murderer");
-            DisplayNames.Add("tunneldweller", "Tunneldweller");
-            DisplayNames.Add("underwaterdweller", "Underwater Dweller");
+            DisplayNames.Add("npc_tunneldweller", "Tunnel Dweller");
+            DisplayNames.Add("npc_underwaterdweller", "Underwater Dweller");
             DisplayNames.Add("scarecrow", "Scarecrow");
             DisplayNames.Add("simpleshark", "Shark");
         }
@@ -848,6 +846,29 @@ namespace Oxide.Plugins
         #endregion
 
         #region Functions
+
+        private string getEntityName(BaseEntity entity)
+        {
+            string entname = entity?.ShortPrefabName ?? null;
+            if (entname == null) return null;
+
+            if (entname == "testridablehorse")
+            {
+                entname = "horse";
+            }
+
+            if ((entname.Contains("scientist")) && (!entname.Contains("corpse")))
+            {
+                entname = "scientist";
+            }
+
+            if (entname.Contains("wolf"))
+            {
+                entname = "wolf";
+            }
+
+            return entname;
+        }
 
         private bool isAdmin(BasePlayer player)
         {
@@ -1180,13 +1201,13 @@ namespace Oxide.Plugins
             SaveVendorData();
         }
 
-        private ulong GetLastAttacker(uint id)
+        private ulong GetLastAttacker(NetworkableId id)
         {
             int hits = 0;
             ulong majorityPlayer = 0U;
-            if (HeliAttackers.ContainsKey(id))
+            if (VehicleAttackers.ContainsKey(id))
             {
-                foreach (var score in HeliAttackers[id])
+                foreach (var score in VehicleAttackers[id])
                 {
                     if (score.Value > hits)
                         majorityPlayer = score.Key;

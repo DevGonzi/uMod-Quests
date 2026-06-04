@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Quests", "Gonzi", "2.4.2")]
+    [Info("Quests", "Gonzi", "2.4.5")]
     [Description("Creates quests for players to go on to earn rewards, complete with a GUI menu")]
     public class Quests : RustPlugin
     {
@@ -51,10 +51,10 @@ namespace Oxide.Plugins
         private Dictionary<ulong, bool> AddVendor = new Dictionary<ulong, bool>();
 
         private Dictionary<QuestType, List<string>> AllObjectives = new Dictionary<QuestType, List<string>>();
-        private Dictionary<uint, Dictionary<ulong, int>> HeliAttackers = new Dictionary<uint, Dictionary<ulong, int>>();
+        private Dictionary<NetworkableId, Dictionary<ulong, int>> HeliAttackers = new Dictionary<NetworkableId, Dictionary<ulong, int>>();
 
         private Dictionary<ulong, List<string>> OpenUI = new Dictionary<ulong, List<string>>();
-        private Dictionary<uint, ulong> Looters = new Dictionary<uint, ulong>();
+        private Dictionary<ItemId, ulong> Looters = new Dictionary<ItemId, ulong>();
 
         private List<ulong> StatsMenu = new List<ulong>();
         private List<ulong> OpenMenuBind = new List<ulong>();
@@ -327,22 +327,23 @@ namespace Oxide.Plugins
             try
             {
                 if (entity == null || info == null) return;
-                string entname = entity?.ShortPrefabName;
-                if (entname == "testridablehorse")
-                {
-                    entname = "horse";
-                }
-
+                string entname = entity?.ShortPrefabName ?? string.Empty;
                 if ((entname.Contains("scientist")) && (!entname.Contains("corpse")))
                 {
                     entname = "scientist";
                 }
+                
+                if (entname == "ridablehorse") entname = "horse";
+                if (entname == "npc_tunneldweller") entname = "tunneldweller";
+                if (entname == "npc_underwaterdweller") entname = "underwaterdweller";               
+                if (entname == "snake.entity") entname = "snake";
+                if (entname == "wolf2") entname = "wolf";                
 
                 BasePlayer player = null;
 
                 if (info.InitiatorPlayer != null)
                     player = info.InitiatorPlayer;
-                else if (entity.GetComponent<BaseHelicopter>() != null)
+                else if (entity.GetComponent<PatrolHelicopter>() != null)
                     player = BasePlayer.FindByID(GetLastAttacker(entity.net.ID));
 
                 if (player != null)
@@ -361,9 +362,9 @@ namespace Oxide.Plugins
 
         void OnEntityTakeDamage(BaseCombatEntity victim, HitInfo info)
         {
-            if (victim.GetComponent<BaseHelicopter>() != null && info?.Initiator?.ToPlayer() != null)
+            if (victim.GetComponent<PatrolHelicopter>() != null && info?.Initiator?.ToPlayer() != null)
             {
-                var heli = victim.GetComponent<BaseHelicopter>();
+                var heli = victim.GetComponent<PatrolHelicopter>();
                 var player = info.Initiator.ToPlayer();
                 if (isPlaying(player)) return;
                 NextTick(() =>
@@ -405,9 +406,10 @@ namespace Oxide.Plugins
         }
 
         //Craft
-        void OnItemCraftFinished(ItemCraftTask task, Item item)
+        private void OnItemCraftFinished(ItemCraftTask task, Item item, ItemCrafter instance)
         {
-            var player = task.owner;
+            if (instance is null) return;
+            var player = instance.owner;
             if (player != null)
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Craft))
                     ProcessProgress(player, QuestType.Craft, item.info.shortname, item.amount);
@@ -811,12 +813,17 @@ namespace Oxide.Plugins
             AllObjectives[QuestType.Kill] = new List<string>
             {
                 "bear",
+                "polarbear",
                 "boar",
                 "bradleyapc",
                 "chicken",
                 "horse",
                 "stag",
                 "wolf",
+                "tiger",
+                "panther",
+                "crocodile",
+                "snake",
                 "autoturret_deployed",
                 "patrolhelicopter",
                 "player",
@@ -828,12 +835,17 @@ namespace Oxide.Plugins
                 "simpleshark"
             };
             DisplayNames.Add("bear", "Bear");
+            DisplayNames.Add("polarbear", "PolarBear");
             DisplayNames.Add("boar", "Boar");
             DisplayNames.Add("bradleyapc", "BradleyAPC");
             DisplayNames.Add("chicken", "Chicken");
             DisplayNames.Add("horse", "Horse");
             DisplayNames.Add("stag", "Stag");
             DisplayNames.Add("wolf", "Wolf");
+            DisplayNames.Add("tiger", "Tiger");
+            DisplayNames.Add("panther", "Panther");
+            DisplayNames.Add("crocodile", "Crocodile");
+            DisplayNames.Add("snake", "Snake");
             DisplayNames.Add("autoturret_deployed", "Auto-Turret");
             DisplayNames.Add("patrolhelicopter", "Helicopter");
             DisplayNames.Add("player", "Player");
@@ -961,15 +973,24 @@ namespace Oxide.Plugins
 
         private bool GiveReward(BasePlayer player, List<RewardItem> rewards)
         {
+			int slotrequired = 0;
+			// scan rewards to fix exploit with multiple rewards and no slot available
             foreach (var reward in rewards)
             {
-                if (reward.isCoins && Economics)
+				if (reward.isCoins || reward.isRP || reward.isHuntXP) continue;
+				else slotrequired++;
+			}
+			if (!player.inventory.HasEmptySlots(slotrequired)) return false;
+				
+            foreach (var reward in rewards)
+            {
+                if (reward.isCoins)
                 {
-                    Economics.Call("Deposit", player.UserIDString, (double)reward.Amount);
+                    Economics?.Call("Deposit", player.UserIDString, (double)reward.Amount);
                 }
-                else if (reward.isRP && ServerRewards)
+                else if (reward.isRP)
                 {
-                    ServerRewards.Call("AddPoints", player.userID, (int)reward.Amount);
+                    ServerRewards?.Call("AddPoints", player.userID, (int)reward.Amount);
                 }
                 else if (reward.isHuntXP)
                 {
@@ -981,7 +1002,7 @@ namespace Oxide.Plugins
                     var definition = FindItemDefinition(reward.ShortName);
                     if (definition != null)
                     {
-                        if (player.inventory.AllItems().Count() >= 30) return false;
+                        //if (!player.inventory.HasEmptySlotInBeltOrMain()) return false;
                         var item = ItemManager.Create(definition, (int)reward.Amount, reward.Skin);
                         if (item != null)
                         {
@@ -1180,7 +1201,7 @@ namespace Oxide.Plugins
             SaveVendorData();
         }
 
-        private ulong GetLastAttacker(uint id)
+        private ulong GetLastAttacker(NetworkableId id)
         {
             int hits = 0;
             ulong majorityPlayer = 0U;
@@ -2315,9 +2336,9 @@ namespace Oxide.Plugins
             var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            var vendorID = arg.Args[0];
-            var targetID = arg.Args[1];
-            var distance = arg.Args[2];
+            var vendorID = arg.GetString(0);
+            var targetID = arg.GetString(1);
+            var distance = arg.GetString(2);
             PlayerProgress[player.userID].CurrentDelivery = new ActiveDelivery { VendorID = vendorID, TargetID = targetID, Distance = float.Parse(distance) };
             PopupMessage(player, LA("dAccep", player.UserIDString));
             DestroyUI(player);
@@ -2627,7 +2648,7 @@ namespace Oxide.Plugins
                 if (ActiveCreations.ContainsKey(player.userID))
                     Creator = ActiveCreations[player.userID];
                 else Creator = ActiveEditors[player.userID];
-                switch (arg.Args[0])
+                switch (arg.GetString(0))
                 {
                     case "0":
                         Creator.entry.ItemDeduction = false;
@@ -2723,7 +2744,7 @@ namespace Oxide.Plugins
             {
                 if (arg.Args == null || arg.Args.Length == 0) return;
 
-                if (arg.Args.Length == 1 && arg.Args[0] == "reject")
+                if (arg.Args.Length == 1 && arg.GetString(0) == "reject")
                 {
                     DestroyUI(player);
                     CreateMenu(player);
@@ -2757,7 +2778,7 @@ namespace Oxide.Plugins
                 return;
             if (isAdmin(player))
             {
-                var ID = arg.Args[0];
+                var ID = arg.GetString(0);
                 foreach (var npc in vendors.QuestVendors)
                 {
                     if (npc.Key == ID)
@@ -2828,7 +2849,7 @@ namespace Oxide.Plugins
                     var Creator = ActiveEditors[player.userID];
 
                     DestroyUI(player);
-                    switch (arg.Args[0].ToLower())
+                    switch (arg.GetString(0).ToLower())
                     {
                         case "name":
                             CreationHelp(player, 0);
@@ -2865,8 +2886,8 @@ namespace Oxide.Plugins
             if (isAdmin(player))
             {
                 QuestCreator Creator = ActiveEditors[player.userID];
-                var amount = arg.Args[0];
-                var dispName = arg.Args[1];
+                var amount = arg.GetString(0);
+                var dispName = arg.GetString(1);
                 foreach (var entry in Creator.entry.Rewards)
                 {
                     if (entry.Amount == float.Parse(amount) && entry.DisplayName == dispName)
